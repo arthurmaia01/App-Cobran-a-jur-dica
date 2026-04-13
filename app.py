@@ -5,170 +5,162 @@ import sqlite3
 import io
 from datetime import datetime
 
-# --- CONFIGURAÇÃO ---
-st.set_page_config(page_title="Gestão Arthur Pinheiro", layout="wide")
+# --- CONFIGURAÇÃO DA PÁGINA ---
+st.set_page_config(page_title="Arthur Pinheiro | BI", layout="wide")
 
-def style():
+def aplicar_estilo():
     st.markdown("""
         <style>
-        .stApp { background-color: #f4f7f9; }
+        .stApp { background-color: #f8f9fa; }
         [data-testid="stSidebar"] { background-color: #001f3f !important; }
-        .main-card { background-color: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); margin-bottom: 20px; border-left: 5px solid #001f3f; }
-        .watermark { position: fixed; bottom: 10px; right: 15px; opacity: 0.4; color: #001f3f; font-weight: bold; font-size: 12px; }
+        .card { background-color: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); border-left: 6px solid #001f3f; margin-bottom: 20px; }
+        .watermark { position: fixed; bottom: 10px; right: 15px; opacity: 0.3; font-weight: bold; color: #001f3f; }
         </style>
         <div class="watermark">Arthur Pinheiro - Business Intelligence</div>
     """, unsafe_allow_html=True)
 
-style()
+aplicar_estilo()
 
 # --- BANCO DE DADOS ---
-conn = sqlite3.connect('banco_central.db', check_same_thread=False)
+conn = sqlite3.connect('banco_geral_v3.db', check_same_thread=False)
 c = conn.cursor()
 
-def init_db():
+def criar_tabelas():
     c.execute('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, email TEXT, password TEXT, role TEXT, status TEXT)')
-    # client_id = 0 significa que a planilha está na biblioteca global (sem dono)
-    c.execute('CREATE TABLE IF NOT EXISTS data_files (id INTEGER PRIMARY KEY, client_id INTEGER, name TEXT, content TEXT, type TEXT, date TEXT)')
+    c.execute('CREATE TABLE IF NOT EXISTS biblioteca (id INTEGER PRIMARY KEY, client_id INTEGER, name TEXT, content TEXT, type TEXT, date TEXT)')
     c.execute("INSERT OR IGNORE INTO users VALUES (1, 'admin@master.com', '1234', 'admin', 'active')")
     conn.commit()
 
-init_db()
+criar_tabelas()
 
-# --- LOGIN ---
-if 'logged_user' not in st.session_state:
-    st.session_state.logged_user = None
+# --- LOGICA DE ACESSO ---
+if 'usuario' not in st.session_state:
+    st.session_state.usuario = None
 
-if st.session_state.logged_user is None:
+if st.session_state.usuario is None:
     col1, col2, col3 = st.columns([1,1.5,1])
     with col2:
-        st.markdown('<div class="main-card">', unsafe_allow_html=True)
-        st.title("🛡️ Portal de Relatórios")
-        t_log, t_reg = st.tabs(["Entrar", "Novo Cadastro"])
-        with t_log:
-            e = st.text_input("E-mail")
-            p = st.text_input("Senha", type="password")
-            if st.button("Acessar Sistema"):
-                c.execute("SELECT * FROM users WHERE email=? AND password=? AND status='active'", (e, p))
-                res = c.fetchone()
-                if res:
-                    st.session_state.logged_user = res
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.title("🔐 Acesso Restrito")
+        aba1, aba2 = st.tabs(["Login", "Solicitar Cadastro"])
+        with aba1:
+            email = st.text_input("E-mail")
+            senha = st.text_input("Senha", type="password")
+            if st.button("Entrar no Sistema"):
+                c.execute("SELECT * FROM users WHERE email=? AND password=? AND status='active'", (email, senha))
+                user = c.fetchone()
+                if user:
+                    st.session_state.usuario = user
                     st.rerun()
-                else: st.error("Acesso não autorizado.")
-        with t_reg:
-            ne = st.text_input("E-mail de Cadastro")
-            np = st.text_input("Senha de Cadastro")
-            nr = st.selectbox("Perfil", ["Cliente", "Admin"])
-            if st.button("Solicitar Acesso"):
-                c.execute("INSERT INTO users (email, password, role, status) VALUES (?,?,?,?)", (ne, np, nr, 'pending'))
-                conn.commit()
-                st.success("Solicitação enviada!")
+                else: st.error("Usuário não encontrado ou não aprovado.")
+        with aba2:
+            n_email = st.text_input("E-mail para cadastro")
+            n_senha = st.text_input("Senha para cadastro")
+            n_role = st.selectbox("Eu sou:", ["Cliente", "Admin"])
+            if st.button("Enviar Pedido"):
+                try:
+                    c.execute("INSERT INTO users (email, password, role, status) VALUES (?,?,?,?)", (n_email, n_senha, n_role, 'pending'))
+                    conn.commit()
+                    st.success("Pedido enviado! Fale com Arthur para aprovar.")
+                except: st.error("Erro ou e-mail já cadastrado.")
         st.markdown('</div>', unsafe_allow_html=True)
 
 else:
-    u_id, u_email, _, u_role, _ = st.session_state.logged_user
-    st.sidebar.markdown(f"<h3 style='color:white;'>Olá, {u_email.split('@')[0]}</h3>", unsafe_allow_html=True)
-    
+    u_id, u_email, _, u_role, _ = st.session_state.usuario
+    st.sidebar.title("Menu")
+    st.sidebar.write(f"Logado como: **{u_email}**")
     if st.sidebar.button("Sair"):
-        st.session_state.logged_user = None
+        st.session_state.usuario = None
         st.rerun()
 
-    # --- DASHBOARD ADMIN ---
+    # --- ÁREA DO ADMINISTRADOR ---
     if u_role == 'admin':
-        menu = st.sidebar.radio("Navegação", ["Dashboard", "Biblioteca de Planilhas", "Vincular a Clientes", "Gestão de Usuários"])
+        menu = st.sidebar.radio("Navegação", ["📥 Biblioteca (Upload)", "🔗 Vincular ao Cliente", "👥 Aprovar Usuários", "📊 Visão Geral"])
 
-        if menu == "Dashboard":
-            st.header("📈 Visão Geral Administrativa")
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Total Usuários", len(pd.read_sql("SELECT * FROM users", conn)))
-            c2.metric("Planilhas no Sistema", len(pd.read_sql("SELECT * FROM data_files", conn)))
-            c3.metric("Planilhas Sem Dono", len(pd.read_sql("SELECT * FROM data_files WHERE client_id=0", conn)))
-
-        elif menu == "Biblioteca de Planilhas":
-            st.header("📂 Central de Upload (Independente)")
-            st.markdown("Aqui você anexa as planilhas ao sistema, mesmo que o cliente ainda não exista.")
+        if menu == "📥 Biblioteca (Upload)":
+            st.header("📥 Central de Planilhas (Biblioteca)")
+            st.markdown('<div class="card">Nesta área você sobe os arquivos para o sistema de forma independente. Eles ficam guardados aqui até você decidir para qual cliente enviar.</div>', unsafe_allow_html=True)
             
-            tipo = st.radio("Fonte", ["Arquivo Excel/CSV", "Link Google Sheets"])
-            nome_rel = st.text_input("Nome do Relatório (Ex: Faturamento Mensal)")
+            nome_doc = st.text_input("Nome do Relatório (Ex: Performance Vendas Jan/24)")
+            metodo = st.radio("Origem", ["Arquivo (Excel/CSV)", "Link (Google Sheets)"])
             
-            if tipo == "Arquivo Excel/CSV":
-                f = st.file_uploader("Arraste o arquivo", type=['xlsx', 'csv'])
-                if f and nome_rel and st.button("Salvar na Biblioteca"):
-                    df = pd.read_csv(f) if f.name.endswith('csv') else pd.read_excel(f)
-                    c.execute("INSERT INTO data_files (client_id, name, content, type, date) VALUES (0, ?, ?, 'file', ?)",
-                              (nome_rel, df.to_json(), datetime.now().strftime("%d/%m/%Y")))
+            if metodo == "Arquivo (Excel/CSV)":
+                arq = st.file_uploader("Selecione o arquivo", type=['xlsx', 'csv'])
+                if arq and nome_doc and st.button("Salvar na Biblioteca"):
+                    df = pd.read_csv(arq) if arq.name.endswith('csv') else pd.read_excel(arq)
+                    # client_id = 0 significa que está na biblioteca sem dono
+                    c.execute("INSERT INTO biblioteca (client_id, name, content, type, date) VALUES (0, ?, ?, 'file', ?)",
+                              (nome_doc, df.to_json(), datetime.now().strftime("%d/%m/%Y")))
                     conn.commit()
-                    st.success(f"'{nome_rel}' salvo na biblioteca global!")
+                    st.success(f"'{nome_doc}' adicionado à biblioteca com sucesso!")
             else:
-                link = st.text_input("Link de Exportação CSV do Google")
-                if link and nome_rel and st.button("Vincular Link à Biblioteca"):
-                    c.execute("INSERT INTO data_files (client_id, name, content, type, date) VALUES (0, ?, ?, 'link', ?)",
-                              (nome_rel, link, datetime.now().strftime("%d/%m/%Y")))
+                link_g = st.text_input("Link de exportação CSV do Google")
+                if link_g and nome_doc and st.button("Vincular Link"):
+                    c.execute("INSERT INTO biblioteca (client_id, name, content, type, date) VALUES (0, ?, ?, 'link', ?)",
+                              (nome_doc, link_g, datetime.now().strftime("%d/%m/%Y")))
                     conn.commit()
-                    st.success("Link guardado no sistema!")
+                    st.success("Link salvo na biblioteca!")
 
-        elif menu == "Vincular a Clientes":
-            st.header("🔗 Direcionar Relatórios")
+        elif menu == "🔗 Vincular ao Cliente":
+            st.header("🔗 Direcionar Planilha para Cliente")
             
-            # 1. Escolher Planilha da Biblioteca
-            planilhas_livres = pd.read_sql("SELECT id, name FROM data_files WHERE client_id=0", conn)
-            if planilhas_livres.empty:
-                st.info("Não há planilhas pendentes na biblioteca.")
+            # Pega planilhas que estão na biblioteca (client_id = 0)
+            livres = pd.read_sql("SELECT id, name FROM biblioteca WHERE client_id=0", conn)
+            # Pega clientes ativos
+            clientes = pd.read_sql("SELECT id, email FROM users WHERE role='Cliente' AND status='active'", conn)
+            
+            if livres.empty:
+                st.info("Não há planilhas novas na biblioteca para vincular.")
+            elif clientes.empty:
+                st.warning("Não há clientes cadastrados ou aprovados.")
             else:
-                p_escolhida = st.selectbox("Qual planilha deseja vincular?", planilhas_livres['name'].tolist())
-                p_id = planilhas_livres[planilhas_livres['name'] == p_escolhida]['id'].values[0]
+                p_nome = st.selectbox("Escolha a Planilha", livres['name'].tolist())
+                c_email = st.selectbox("Escolha o Cliente Destinatário", clientes['email'].tolist())
                 
-                # 2. Escolher Cliente
-                clientes = pd.read_sql("SELECT id, email FROM users WHERE role='Cliente' AND status='active'", conn)
-                if clientes.empty:
-                    st.warning("Não há clientes ativos. Aprove um cliente primeiro em 'Gestão de Usuários'.")
-                else:
-                    c_escolhido = st.selectbox("Para qual cliente?", clientes['email'].tolist())
-                    c_id = clientes[clientes['email'] == c_escolhido]['id'].values[0]
-                    
-                    if st.button("Confirmar Entrega"):
-                        c.execute("UPDATE data_files SET client_id=? WHERE id=?", (int(c_id), int(p_id)))
-                        conn.commit()
-                        st.success(f"Planilha vinculada com sucesso ao cliente {c_escolhido}!")
-                        st.rerun()
+                p_id = livres[livres['name'] == p_nome]['id'].values[0]
+                c_id = clientes[clientes['email'] == c_email]['id'].values[0]
+                
+                if st.button("Vincular Agora"):
+                    c.execute("UPDATE biblioteca SET client_id=? WHERE id=?", (int(c_id), int(p_id)))
+                    conn.commit()
+                    st.success("Vinculado com sucesso! O cliente já pode ver o relatório.")
+                    st.rerun()
 
-        elif menu == "Gestão de Usuários":
-            st.header("👥 Aprovação de Contas")
-            users = pd.read_sql("SELECT id, email, role, status FROM users", conn)
-            st.dataframe(users, use_container_width=True)
-            u_to_app = st.number_input("ID do Usuário para Ativar/Aprovar", step=1)
-            if st.button("Aprovar Agora"):
-                c.execute("UPDATE users SET status='active' WHERE id=?", (u_to_app,))
+        elif menu == "👥 Aprovar Usuários":
+            st.header("👥 Gerenciar Acessos")
+            usuarios = pd.read_sql("SELECT id, email, role, status FROM users", conn)
+            st.dataframe(usuarios, use_container_width=True)
+            uid = st.number_input("ID do usuário para Aprovar", step=1)
+            if st.button("Aprovar Cadastro"):
+                c.execute("UPDATE users SET status='active' WHERE id=?", (uid,))
                 conn.commit()
+                st.success("Usuário aprovado!")
                 st.rerun()
 
-    # --- DASHBOARD CLIENTE ---
+    # --- ÁREA DO CLIENTE ---
     else:
-        st.header(f"📊 Seus Relatórios Disponíveis")
-        files = pd.read_sql(f"SELECT * FROM data_files WHERE client_id={u_id}", conn)
+        st.header(f"📊 Seus Relatórios")
+        meus_dados = pd.read_sql(f"SELECT * FROM biblioteca WHERE client_id={u_id}", conn)
         
-        if files.empty:
-            st.info("Nenhum relatório foi direcionado para você ainda.")
+        if meus_dados.empty:
+            st.info("Olá! Seus relatórios aparecerão aqui assim que forem processados pelo administrador.")
         else:
-            sel_f = st.selectbox("Escolha o Relatório para Visualizar", files['name'].tolist())
-            row = files[files['name'] == sel_f].iloc[0]
+            escolha = st.selectbox("Selecione o Relatório", meus_dados['name'].tolist())
+            linha = meus_dados[meus_dados['name'] == escolha].iloc[0]
             
-            if row['type'] == 'file': df = pd.read_json(io.StringIO(row['content']))
-            else: df = pd.read_csv(row['content'])
+            if linha['type'] == 'file': df = pd.read_json(io.StringIO(linha['content']))
+            else: df = pd.read_csv(linha['content'])
             
-            # Layout do Relatório
-            st.markdown(f'<div class="main-card"><h3>{sel_f}</h3><p>Data da Carga: {row["date"]}</p></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="card"><h3>{escolha}</h3><p>Atualizado em: {linha["date"]}</p></div>', unsafe_allow_html=True)
             
-            col_a, col_b = st.columns(2)
-            with col_a:
-                st.subheader("Indicadores Principais")
-                st.metric("Total de Registros", len(df))
-                num_cols = df.select_dtypes(include='number').columns
-                if not num_cols.empty:
-                    fig = px.bar(df.head(15), y=num_cols[0], color_discrete_sequence=['#001f3f'], title=f"Top 15 - {num_cols[0]}")
+            c1, c2 = st.columns(2)
+            with c1:
+                st.metric("Total de Linhas", len(df))
+                nums = df.select_dtypes(include='number').columns
+                if not nums.empty:
+                    fig = px.bar(df.head(10), y=nums[0], title=f"Análise: {nums[0]}", color_discrete_sequence=['#001f3f'])
                     st.plotly_chart(fig, use_container_width=True)
-            
-            with col_b:
-                st.subheader("Exploração de Dados")
-                st.dataframe(df, height=400)
+            with c2:
+                st.dataframe(df, height=350)
                 csv = df.to_csv(index=False).encode('utf-8')
-                st.download_button("📥 Exportar para Excel/CSV", csv, f"{sel_f}.csv", "text/csv")
+                st.download_button("📥 Baixar Excel (CSV)", csv, f"{escolha}.csv")
